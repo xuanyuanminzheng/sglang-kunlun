@@ -20,4 +20,3 @@ from . import compressor  # noqa: F401
 from . import index_buf_accessor  # noqa: F401
 from . import quant_k_cache  # noqa: F401
 from . import metadata_kernel  # noqa: F401
-from . import sparse_prefill  # noqa: F401
