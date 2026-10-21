@@ -135,6 +135,7 @@ class KunlunPagedTokenToKVPoolAllocator(PagedTokenToKVPoolAllocator):
         seq_lens_cpu: torch.Tensor,
         last_loc: torch.Tensor,
         extend_num_tokens: int,
+        **kwargs,
     ):
         """Allocate pages for extend tokens using the selected backend kernel."""
         if self.debug_mode:

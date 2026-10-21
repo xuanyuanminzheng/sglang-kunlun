@@ -124,4 +124,5 @@ def load_weights_kunlun(original_fn, self, weights, is_nextn=False):
     """Pre-process the int4/int8 weight stream, then defer to upstream."""
     if envs.SGLANG_OPT_FUSE_WQA_WKV.get():
         weights = _fuse_wqkv_a_weight_scale(weights)
-    return original_fn(self, weights, is_nextn)
+    result = original_fn(self, weights, is_nextn)
+    return result

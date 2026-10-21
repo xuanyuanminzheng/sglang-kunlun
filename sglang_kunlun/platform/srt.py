@@ -38,11 +38,29 @@ from __future__ import annotations
 
 from sglang.srt.platforms.interface import SRTPlatform
 
+from sglang_kunlun.hooks.arg_groups import _resolution_compat as _resolution
+
 from .device import KunlunDeviceMixin
+
+
+try:  # community main exposes declarative platform capabilities
+    from sglang.srt.platforms.interface import PlatformCapabilities
+
+    _KUNLUN_CAPABILITIES = PlatformCapabilities(
+        supports_triton=False,
+        graph_capture=True,
+        piecewise_graph=False,
+        hicache_device_kernels=False,
+    )
+except Exception:  # noqa: BLE001
+    _KUNLUN_CAPABILITIES = None
 
 
 class KunlunSRTPlatform(KunlunDeviceMixin, SRTPlatform):
     """Provide Kunlun-specific SGLang runtime platform integration."""
+
+    if _KUNLUN_CAPABILITIES is not None:
+        capabilities = _KUNLUN_CAPABILITIES
 
     supported_quantization = [
         "w8a8_int8",
@@ -99,7 +117,7 @@ class KunlunSRTPlatform(KunlunDeviceMixin, SRTPlatform):
         Replaces the old ``hooks/server_args.py`` page-size REPLACE hook.
         """
         if getattr(server_args, "page_size", None) is None:
-            server_args.page_size = 128
+            _resolution.declare(server_args, page_size=128)
 
     # ------------------------------------------------------------------
     # Subsystem factory methods

@@ -67,9 +67,16 @@ def alloc_extend_kunlun(
     out_indices = torch.empty(
         (extend_num_tokens,), dtype=torch.int64, device=self.device
     )
-    from sglang.srt.mem_cache.triton_ops.allocator import alloc_extend_kernel
+    # Call the Kunlun implementation directly instead of importing the upstream
+    # symbol through the ``sglang.srt.mem_cache.triton_ops.allocator`` compat
+    # alias: that alias is re-bound at runtime and the module object the caller
+    # sees may not be the one ``kernel_ops.install()`` patched (verified: the
+    # alias path yields a *duplicate* module object holding the raw Triton
+    # JITFunction), so the replacement is lost and the raw kernel is launched
+    # (fails on XPU with ``'_CudaTarget' object has no attribute 'arch'``).
+    from sglang_kunlun.kernels.kernel_ops import alloc_extend_kernel
 
-    alloc_extend_kernel[(bs,)](
+    alloc_extend_kernel(
         prefix_lens,
         seq_lens,
         last_loc,
@@ -84,3 +91,24 @@ def alloc_extend_kunlun(
 
     self.free_pages = self.free_pages[num_new_pages:]
     return out_indices
+
+
+# ---------------------------------------------------------------------------
+# Community main added an explicit guard that forbids out-of-tree platforms
+# from reaching the in-tree DeepSeek-V4 KV pool.  That pool is ordinary Python
+# (torch) code and the Kunlun hooks in this package already replace the
+# device-specific pieces, so allow it through.
+# ---------------------------------------------------------------------------
+from sglang.srt.platforms import interface as _platform_interface
+
+_ORIG_REJECT_OUT_OF_TREE_PATH = _platform_interface.reject_out_of_tree_path
+
+
+@plugin_hook(
+    "sglang.srt.platforms.interface.reject_out_of_tree_path",
+    type=HookType.REPLACE,
+)
+def reject_out_of_tree_path_kunlun(platform, *, subsystem: str):
+    if subsystem == "the DeepSeek-V4 KV pool":
+        return None
+    return _ORIG_REJECT_OUT_OF_TREE_PATH(platform, subsystem=subsystem)

@@ -45,7 +45,6 @@ from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.quantization.fp8 import Fp8Config
 from sglang.srt.layers.quantization.fp8_kernel import is_fp8_fnuz
 from sglang.srt.layers.quantization.w4afp8 import W4AFp8Config, W4AFp8MoEMethod
-from sglang.srt.server_args import get_global_server_args
 from sglang_kunlun.environ import envs as patch_envs
 from sglang.srt.utils import get_bool_env_var, dispose_tensor
 from sglang.srt.layers.activation import SiluAndMul
@@ -499,7 +498,9 @@ class DeepEPMoE(FusedMoE):
         hidden_states = self.dispatcher.combine(
             combine_input=combine_input,
         )
-        if get_global_server_args().dtype in ["float16", "fp16", "half"]:
+        # The internal fork retired ``get_global_server_args()`` (and its
+        # ``dtype`` field); the model dtype is exactly the activation dtype here.
+        if hidden_states.dtype == torch.float16:
             limit = int(patch_envs.SGLANG_FP16_LIMIT_IN_MOE.get())
             hidden_states = hidden_states.clamp(min=-limit, max=limit).to(torch.float16)
 

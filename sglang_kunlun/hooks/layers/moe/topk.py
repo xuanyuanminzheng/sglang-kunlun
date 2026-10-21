@@ -87,23 +87,32 @@ def select_experts_kunlun(
     layer_id: Optional[int] = None,
     num_token_non_padded: Optional[torch.Tensor] = None,
     expert_location_dispatch_info: Optional[ExpertLocationDispatchInfo] = None,
+    **kwargs,
 ) -> StandardTopKOutput:
     """select_experts"""
+    # TopKConfig gained/lost fields across sglang versions; read defensively.
     top_k = topk_config.top_k
-    use_grouped_topk = topk_config.use_grouped_topk
-    topk_group = topk_config.topk_group
-    num_expert_group = topk_config.num_expert_group
-    renormalize = topk_config.renormalize
-    num_fused_shared_experts = topk_config.num_fused_shared_experts
-    custom_routing_function = topk_config.custom_routing_function
-    correction_bias = topk_config.correction_bias
-    torch_native = topk_config.torch_native
-    routed_scaling_factor = topk_config.routed_scaling_factor
-    apply_routed_scaling_factor_on_output = (
-        topk_config.apply_routed_scaling_factor_on_output
+    use_grouped_topk = getattr(topk_config, "use_grouped_topk", False)
+    topk_group = getattr(topk_config, "topk_group", None)
+    num_expert_group = getattr(topk_config, "num_expert_group", None)
+    renormalize = getattr(topk_config, "renormalize", True)
+    num_fused_shared_experts = getattr(
+        topk_config, "num_fused_shared_experts", None
+    )
+    if num_fused_shared_experts is None:
+        # Community main models fused shared experts via TopKConfig.shared_experts.
+        num_fused_shared_experts = getattr(
+            topk_config, "num_shared_topk_slots", 0
+        )
+    custom_routing_function = getattr(topk_config, "custom_routing_function", None)
+    correction_bias = getattr(topk_config, "correction_bias", None)
+    torch_native = getattr(topk_config, "torch_native", False)
+    routed_scaling_factor = getattr(topk_config, "routed_scaling_factor", 1.0)
+    apply_routed_scaling_factor_on_output = getattr(
+        topk_config, "apply_routed_scaling_factor_on_output", False
     )
 
-    scoring_func = topk_config.scoring_func
+    scoring_func = getattr(topk_config, "scoring_func", "softmax")
 
     router_logits, correction_bias = (
         expert_location_dispatch.transform_select_experts_inputs(

@@ -76,14 +76,26 @@ def kunlun_init_model_parallel_group(
     use_mscclpp_allreduce: Optional[bool] = None,
     use_torch_symm_mem_allreduce: Optional[bool] = None,
     recovered_rank: bool = False,
+    **extra,
 ):
+    """Kunlun: init GroupCoordinator with XPU/NPU/HPU communicators.
+
+    ``**extra`` absorbs keywords newer sglang added to this call
+    (``rank_offset`` / ``max_world_size`` / ``device_pg_options``); they are
+    forwarded only when ``GroupCoordinator`` declares them, so one hook body
+    works across sglang releases.
+    """
     """Kunlun: init GroupCoordinator with XPU/NPU/HPU communicators."""
-    from sglang.srt.distributed.parallel_state import (
-        _ENABLE_CUSTOM_ALL_REDUCE,
-        _ENABLE_MSCCLPP_ALL_REDUCE,
-        _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE,
-        GroupCoordinator,
+    # Community main removed/renamed some of these module flags; only the
+    # group construction below is load-bearing on Kunlun.
+    from sglang.srt.distributed import parallel_state as _ps
+
+    _ENABLE_CUSTOM_ALL_REDUCE = getattr(_ps, "_ENABLE_CUSTOM_ALL_REDUCE", False)
+    _ENABLE_MSCCLPP_ALL_REDUCE = getattr(_ps, "_ENABLE_MSCCLPP_ALL_REDUCE", False)
+    _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE = getattr(
+        _ps, "_ENABLE_TORCH_SYMM_MEM_ALL_REDUCE", False
     )
+    GroupCoordinator = _ps.GroupCoordinator
 
     if use_custom_allreduce is None:
         use_custom_allreduce = _ENABLE_CUSTOM_ALL_REDUCE
@@ -92,12 +104,18 @@ def kunlun_init_model_parallel_group(
     if use_torch_symm_mem_allreduce is None:
         use_torch_symm_mem_allreduce = _ENABLE_TORCH_SYMM_MEM_ALL_REDUCE
 
-    return GroupCoordinator(
+    import inspect
+
+    ctor_params = set(inspect.signature(GroupCoordinator.__init__).parameters)
+    forwarded = {k: v for k, v in extra.items() if k in ctor_params}
+
+    kwargs = dict(
         group_ranks=group_ranks,
         local_rank=local_rank,
         torch_distributed_backend=backend,
         use_pynccl=False,
         use_pymscclpp=use_mscclpp_allreduce,
+        use_mscclpp=use_mscclpp_allreduce,
         use_custom_allreduce=use_custom_allreduce,
         use_torch_symm_mem_all_reduce=use_torch_symm_mem_allreduce,
         use_hpu_communicator=True,
@@ -106,4 +124,9 @@ def kunlun_init_model_parallel_group(
         use_message_queue_broadcaster=use_message_queue_broadcaster,
         group_name=group_name,
         recovered_rank=recovered_rank,
+        **forwarded,
     )
+    # Drop kwargs the running sglang's GroupCoordinator does not declare
+    # (e.g. community main renamed use_pymscclpp -> use_mscclpp).
+    kwargs = {k: v for k, v in kwargs.items() if k in ctor_params}
+    return GroupCoordinator(**kwargs)
