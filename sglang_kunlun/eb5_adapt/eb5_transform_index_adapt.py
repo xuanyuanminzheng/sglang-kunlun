@@ -69,16 +69,31 @@ def transform_index_page_table_decode_fast(
     result: Optional[torch.Tensor] = None,
     page_size: int = 1,
 ) -> torch.Tensor:
-    """decode：行对齐 gather，负下标/越界写 -1。"""
+    """decode：行对齐 gather，负下标/越界写 -1。
+
+    target-verify / draft-extend 下 ``topk_indices`` 是 per-token 的（一行一个
+    query token），而 page table 可能仍是 per-request 的一行；框架自己用
+    ``repeat_interleave(speculative_num_draft_tokens)`` 展开，这里按同样的语义
+    补齐，非整除的行数直接报错而不是静默取错行。
+    """
 
     assert page_size == 1
-    assert page_table.shape[0] == topk_indices.shape[0]
     assert topk_indices.shape[1] == 2048
     qo_len = topk_indices.shape[0]
+    rows = page_table.shape[0]
+    if rows == qo_len:
+        src = page_table
+    elif rows > 0 and qo_len > rows and qo_len % rows == 0:
+        src = page_table.repeat_interleave(qo_len // rows, dim=0)
+    else:
+        raise ValueError(
+            "transform_index_page_table_decode_fast: page_table rows "
+            f"{rows} cannot be aligned to {qo_len} query tokens"
+        )
     if result is None:
         result = torch.empty_like(topk_indices, dtype=torch.int32)
 
-    src = page_table[:qo_len].to(torch.int32)
+    src = src.to(torch.int32)
     sel = topk_indices.to(torch.int64)
     n_cols = src.shape[1]
     valid = (sel >= 0) & (sel < n_cols)

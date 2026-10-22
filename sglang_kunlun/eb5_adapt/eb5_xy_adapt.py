@@ -129,6 +129,60 @@ def _make_compress_zero_guard(original):
     return _guard
 
 
+def _make_nextn_idle_guard(original):
+    """Idle 下 nextn 尾部只保留形状，别让 padded 行数把它顶崩。
+
+    ``forward`` 的 idle 分支写死 ``reshape(0, hidden)``，前提是 decoder 对空
+    batch 返回 0 行；昆仑上 HCA 后端可能返回 padded 行（本次是 8 行），
+    ``reshape`` 直接报 "invalid for input of size"。idle 的输出本来就要丢弃，
+    所以只在这次 reshape 失败时补一个 0 行的等价返回值。
+    """
+
+    def forward(self, input_ids, positions, forward_batch, *args, **kwargs):
+        if not (self.mhc_enabled and forward_batch.forward_mode.is_idle()):
+            return original(self, input_ids, positions, forward_batch, *args, **kwargs)
+        try:
+            return original(self, input_ids, positions, forward_batch, *args, **kwargs)
+        except RuntimeError as exc:
+            if "invalid for input of size" not in str(exc):
+                raise
+            hidden = input_ids.new_empty((0, self.hidden_size))
+            return hidden, input_ids.new_empty(
+                (0, self.hc_mult * self.hidden_size)
+            )
+
+    return forward
+
+
+def _install_nextn_idle_guard() -> list:
+    """给 EB5 NextN draft 的 idle 前向加兜底。"""
+    import importlib
+    import sys
+
+    try:
+        importlib.import_module("sglang.srt.internal.models.eb5.ernie5_nextn")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[eb5-xy-adapt] import ernie5_nextn failed: {exc}")
+        return []
+
+    patched = []
+    for mod_name, module in list(sys.modules.items()):
+        if module is None or not mod_name.startswith("sglang."):
+            continue
+        for cls in list(vars(module).values()):
+            if not isinstance(cls, type) or not hasattr(cls, "mhc_contract"):
+                continue
+            if getattr(cls, "_eb5_idle_guard", False):
+                continue
+            original = cls.__dict__.get("forward")
+            if original is None:
+                continue
+            cls.forward = _make_nextn_idle_guard(original)
+            cls._eb5_idle_guard = True
+            patched.append(f"{mod_name}.{cls.__name__}.forward")
+    return patched
+
+
 def _install_dp_idle_guards() -> list:
     """XPU 内核拒绝 zero-element launch，给两处空 batch 路径加短路。"""
     import importlib
@@ -182,7 +236,11 @@ def _install_dp_idle_guards() -> list:
 def apply() -> list:
     """应用 xy fork 专属适配，返回已 patch 的符号列表。"""
     patched = []
-    for hook in (_install_ernie5_ops, _install_dp_idle_guards):
+    for hook in (
+        _install_ernie5_ops,
+        _install_dp_idle_guards,
+        _install_nextn_idle_guard,
+    ):
         try:
             patched.extend(hook())
         except Exception as exc:  # noqa: BLE001
