@@ -136,7 +136,37 @@ bash "$W/code/xy/sglang-kunlun/examples/eb/tool/stop_kunlun.sh"
 - 日志：`applied 142 EB5 Kunlun patches from sglang_kunlun.eb5_adapt`
 - 致命错误计数 0
 
-## 7. Decode CUDA graph（实验）
+## 7. MTP（EAGLE 1 步 / 2 draft token）
+
+2026-10-22 实测通过（43 层 / INT8 / 8 卡 / 关图）：ready 正常，4/4 请求 HTTP 200，
+日志出现 `[spec-decode] verify_strategy=target_match enabled (algorithm=EAGLE,
+num_draft_tokens=2)`。
+
+```bash
+cd "$W"
+export SGLANG_DSA_FUSE_TOPK=false      # torch 版 draft top-k 的前提
+LAYERS=43 EB5_GPUS=0,1,2,3,4,5,6,7 CONTEXT_LENGTH=32768 MEM_FRACTION=0.88 \
+EXTRA_ARGS="--dsa-topk-backend torch --speculative-dsa-topk-backend torch \
+  --speculative-algorithm EAGLE --speculative-num-steps 1 \
+  --speculative-eagle-topk 1 --speculative-num-draft-tokens 2 \
+  --speculative-verify-strategy target_match" \
+bash "$W/code/xy/sglang-kunlun/examples/eb/tool/run_eb5_int8.sh" \
+     "$W/models/hf_checkpoint-48800" 30082
+```
+
+三个必需项，缺一个都会崩：
+
+- `--speculative-dsa-topk-backend torch`：draft worker 的后端**独立于**主模型的
+  `--dsa-topk-backend`，默认 `sgl-kernel`，昆腾上会撞
+  `sgl_kernel.fast_topk_transform_fused: not implemented`；
+- `SGLANG_DSA_FUSE_TOPK=false`：上面的 torch 后端要求关掉 fused top-k；
+- `--speculative-num-draft-tokens 2` + `target_match`：与 fork 参考脚本
+  `ce/scripts/eb/gpu-b/eb5_mtp_tp4dp4ep4_128k_opt.sh` 一致。
+
+`run_eb5_kunlun.sh` 默认不带 `--speculative-*`（先跑通主链路），所以这组参数要从
+`EXTRA_ARGS` 传。
+
+## 8. Decode CUDA graph（实验）
 
 当前 overlay 已补上源仓库 doc/7 定位的漏补点：
 
