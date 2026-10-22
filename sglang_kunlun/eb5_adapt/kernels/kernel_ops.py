@@ -1412,6 +1412,38 @@ def generate_draft_decode_kv_indices(
             kv_indptr_row[zid] = base + zid * iters
 
 
+@register_triton_op("sglang.srt.mem_cache.allocation", "assign_req_to_token_pool")
+@register_triton_op("sglang.srt.speculative.spec_utils", "assign_req_to_token_pool")
+@register_triton_op("sglang.srt.speculative.triton_ops.cache_locs", "assign_req_to_token_pool")
+def assign_req_to_token_pool(
+    req_pool_indices: torch.Tensor,
+    req_to_token: torch.Tensor,
+    start_offset: torch.Tensor,
+    end_offset: torch.Tensor,
+    out_cache_loc: torch.Tensor,
+    pool_len: int,
+    bs_upper: int,
+) -> None:
+    """Write accepted cache locations into the request token pool.
+
+    ``mem_cache/allocation.py`` keeps its own copy of this kernel, and that copy
+    is what ``spec_prepare_for_decode`` reaches on the MTP path.
+    """
+
+    batch_size = req_pool_indices.shape[0]
+    if out_cache_loc.dtype != req_to_token.dtype:
+        out_cache_loc = out_cache_loc.to(req_to_token.dtype)
+    torch.ops.xspeedgate_ops.assign_req_to_token_pool(
+        req_pool_indices.to(torch.int32),
+        req_to_token,
+        start_offset.to(torch.int32),
+        end_offset.to(torch.int32),
+        out_cache_loc,
+        pool_len,
+        batch_size,
+    )
+
+
 @register_triton_op("sglang.srt.speculative.triton_ops.cache_locs", "assign_extend_cache_locs")
 def assign_extend_cache_locs(
     req_pool_indices: torch.Tensor,
